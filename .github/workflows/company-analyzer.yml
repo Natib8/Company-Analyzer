@@ -1,0 +1,51 @@
+
+name: Company Analyzer
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r company-analyzer/requirements.txt
+
+      - name: Run analyzer (XLSX output)
+        run: |
+          python company-analyzer/analyzer.py company-analyzer/input_companies.csv company-analyzer/output_companies.xlsx
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-companies
+          path: company-analyzer/output_companies.xlsx
+
+      - name: Send e-mail with XLSX
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Company Analyzer — wynik"
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_FROM }}
+          secure: true
+          body: |
+            Cześć,
+
+            W załączeniu automatyczny raport XLSX z analizy spółek.
+            Pozdrawiam,
+            Company Analyzer (GitHub Actions)
+          attachments: company-analyzer/output_companies.xlsx
