@@ -1,0 +1,10 @@
+pandas
+requests
+rapidfuzz
+tenacity
+python-dateutil
+pdfplumber
+beautifulsoup4
+lxml
+tqdm
+openpyxl
