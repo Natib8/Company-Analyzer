@@ -1,6 +1,12 @@
 name: Company Analyzer
+
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      input_csv:
+        description: "Ścieżka do pliku CSV w repo (np. input_companies.csv)"
+        required: true
+        default: "input_companies.csv"
 
 jobs:
   analyze:
@@ -21,16 +27,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Prepare input (mapuj i czyść CSV)
+      # Jeśli używasz prep_input.py, odkomentuj poniższy blok i użyj cleaned_input.csv niżej.
+      # - name: Prepare input (mapuj i czyść CSV)
+      #   run: |
+      #     python prep_input.py "${{ inputs.input_csv }}" cleaned_input.csv
+
+      - name: Run analyzer (XLSX output)
+        env:
+          PYTHONUNBUFFERED: "1"   # logi na żywo
         run: |
-          python prep_input.py input_companies.csv cleaned_input.csv
+          python analyzer.py "${{ inputs.input_csv }}" output_companies.xlsx 2>&1 | tee run.log
+          # Jeśli używasz prep_stepu powyżej:
+          # python analyzer.py cleaned_input.csv output_companies.xlsx 2>&1 | tee run.log
 
-    - name: Run analyzer (XLSX output)
-      run: |
-        python analyzer.py input_companies_v2.csv output_companies.xlsx
-
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: output-companies
-          path: output_companies.xlsx
+          path: |
+            output_companies.xlsx
+            run.log
