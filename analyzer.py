@@ -1,7 +1,7 @@
-
 import argparse
+import re
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import pandas as pd
 from utils.match import normalize
@@ -20,6 +20,11 @@ OUT_COLUMNS = [
     "Źródło"
 ]
 
+# ---------- helpers: input mapping/cleaning ----------
+
+NAME_HINTS = ["nazwa", "account name", "company", "firma"]
+NIP_HINTS  = ["nip", "vat"]
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -27,6 +32,61 @@ def safe(x, fallback="brak danych"):
     if x is None or (isinstance(x, str) and not x.strip()):
         return fallback
     return x
+
+def _pick_column(columns, hints) -> Tuple[str, str] | Tuple[None, None]:
+    """Zwraca (oryginalna_nazwa_kolumny, dolna_nazwa) dla pierwszego dopasowania po podpowiedziach."""
+    lower_map = {c.lower().strip(): c for c in columns}
+    # ideal: pełny match
+    for h in hints:
+        if h in lower_map:
+            return lower_map[h], h
+    # fuzzy: zawiera
+    for c in columns:
+        lc = c.lower().strip()
+        if any(h in lc for h in hints):
+            return c, lc
+    return None, None
+
+def _norm_nip(x: str) -> str:
+    d = re.sub(r"\D+", "", str(x or ""))
+    return d if len(d) == 10 else ""
+
+def load_input_any(input_csv: str) -> pd.DataFrame:
+    """
+    Czyta dowolny CSV i zwraca DataFrame z kolumnami: nazwa, nip (nip może być pusty).
+    - mapuje nagłówki (np. 'Account Name' -> 'nazwa', 'NIP*' -> 'nip')
+    - czyści NIP do 10 cyfr
+    - usuwa puste nazwy i 'Wypełnienie formularza ...'
+    - deduplikuje po (nazwa, nip)
+    """
+    df = pd.read_csv(input_csv, dtype=str, keep_default_na=False)
+
+    col_name, _ = _pick_column(df.columns, NAME_HINTS)
+    col_nip, _  = _pick_column(df.columns, NIP_HINTS)
+
+    if not col_name:
+        raise SystemExit("Nie znalazłam kolumny z nazwą spółki (np. 'Account Name' / 'Nazwa').")
+
+    out = pd.DataFrame()
+    out["nazwa"] = df[col_name].astype(str).str.strip()
+
+    if col_nip and col_nip in df.columns:
+        out["nip"] = df[col_nip].map(_norm_nip)
+    else:
+        out["nip"] = ""
+
+    # filtry jakości
+    mask_bad = (
+        out["nazwa"].str.strip().eq("") |
+        out["nazwa"].str.contains(r"wypełnienie formularza", case=False, na=False)
+    )
+    out = out[~mask_bad]
+
+    # dedup
+    out = out.drop_duplicates(subset=["nazwa", "nip"]).reset_index(drop=True)
+    return out
+
+# ---------- core ----------
 
 def resolve_company(original_name: str, nip: str) -> Dict[str, Any]:
     original_name_norm = normalize(original_name)
@@ -82,9 +142,11 @@ def main():
     ap.add_argument("output_file")  # CSV lub XLSX
     args = ap.parse_args()
 
-    df = pd.read_csv(args.input_csv)
+    # <<< NEW: wczytaj dowolny CSV i przerób go na (nazwa, nip) >>>
+    df_clean = load_input_any(args.input_csv)
+
     rows_out = []
-    for _, r in df.iterrows():
+    for _, r in df_clean.iterrows():
         nazwa = str(r.get("nazwa") or "").strip()
         nip = str(r.get("nip") or "").strip()
         resolved = resolve_company(nazwa, nip)
