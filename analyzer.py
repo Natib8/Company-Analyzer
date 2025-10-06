@@ -63,35 +63,88 @@ def _norm_nip(x: str) -> str:
 def load_input_any(input_csv: str) -> pd.DataFrame:
     """
     Czyta dowolny CSV i zwraca DataFrame z kolumnami: nazwa, nip (nip może być pusty).
-    - mapuje nagłówki (np. 'Account Name' -> 'nazwa', 'NIP*' -> 'nip')
-    - czyści NIP do 10 cyfr
-    - usuwa puste nazwy i 'Wypełnienie formularza ...'
-    - deduplikuje po (nazwa, nip)
+    - inteligentne rozpoznanie separatora
+    - różne kodowania (utf-8, utf-8-sig, cp1250, latin1)
+    - pomijanie uszkodzonych wierszy (on_bad_lines='skip')
+    - usunięcie wierszy typu 'Wypełnienie formularza ...'
+    - deduplikacja po (nazwa, nip)
     """
-    df = pd.read_csv(input_csv, dtype=str, keep_default_na=False)
+    import itertools
 
-    col_name, _ = _pick_column(df.columns, NAME_HINTS)
-    col_nip, _  = _pick_column(df.columns, NIP_HINTS)
+    def _try_read(enc, sep, engine):
+        try:
+            return pd.read_csv(
+                input_csv,
+                dtype=str,
+                keep_default_na=False,
+                encoding=enc,
+                sep=sep,              # sep=None -> automatyczne rozpoznanie (tylko z engine='python')
+                engine=engine,        # 'python' jest bardziej elastyczny
+                on_bad_lines='skip'   # pomiń wiersze z błędami
+            )
+        except Exception:
+            return None
+
+    # podejścia: (encoding × separator)
+    encodings = ["utf-8", "utf-8-sig", "cp1250", "latin1"]
+    seps = [None, ",", ";", "\t", "|"]  # None = auto sniff (w engine='python')
+    tries = []
+    for e, s in itertools.product(encodings, seps):
+        # auto-sep wymaga engine='python'
+        eng = "python"
+        tries.append((e, s, eng))
+
+    df = None
+    for e, s, eng in tries:
+        df = _try_read(e, s, eng)
+        if df is not None and len(df.columns) >= 1:
+            break
+
+    if df is None:
+        raise SystemExit("Nie udało się wczytać CSV (sprawdź separator i kodowanie).")
+
+    # --- mapowanie nagłówków ---
+    NAME_HINTS = ["nazwa", "account name", "company", "firma"]
+    NIP_HINTS  = ["nip", "vat"]
+
+    def _pick_column(columns, hints):
+        lower_map = {c.lower().strip(): c for c in columns}
+        for h in hints:
+            if h in lower_map:
+                return lower_map[h]
+        for c in columns:
+            lc = c.lower().strip()
+            if any(h in lc for h in hints):
+                return c
+        return None
+
+    col_name = _pick_column(df.columns, NAME_HINTS)
+    col_nip  = _pick_column(df.columns, NIP_HINTS)
 
     if not col_name:
-        raise SystemExit("Nie znalazłam kolumny z nazwą spółki (np. 'Account Name' / 'Nazwa').")
+        raise SystemExit("Nie znalazłam kolumny z nazwą (np. 'Account Name' / 'Nazwa').")
 
     out = pd.DataFrame()
     out["nazwa"] = df[col_name].astype(str).str.strip()
+
+    import re
+    def _norm_nip(x: str) -> str:
+        d = re.sub(r"\D+", "", str(x or ""))
+        return d if len(d) == 10 else ""
 
     if col_nip and col_nip in df.columns:
         out["nip"] = df[col_nip].map(_norm_nip)
     else:
         out["nip"] = ""
 
-    # filtry jakości
+    # odfiltruj „Wypełnienie formularza …” i puste nazwy
     mask_bad = (
         out["nazwa"].str.strip().eq("") |
         out["nazwa"].str.contains(r"wypełnienie formularza", case=False, na=False)
     )
     out = out[~mask_bad]
 
-    # dedup
+    # deduplikacja
     out = out.drop_duplicates(subset=["nazwa", "nip"]).reset_index(drop=True)
     return out
 
