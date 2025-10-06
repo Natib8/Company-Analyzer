@@ -1,12 +1,21 @@
 import argparse
 import re
+import sys
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple
 
 import pandas as pd
-from utils.match import normalize
 
-from adapters import rejestrio, krs, rdf_sprawozdania
+# upewnij się, że root repo jest w ścieżce importów
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.match import normalize
+import adapters.krs as krs
+import adapters.rejestrio as rejestrio
+import adapters.rdf_sprawozdania as rdf_sprawozdania
 
 OUT_COLUMNS = [
     "Nazwa",
