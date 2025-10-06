@@ -25,9 +25,9 @@ jobs:
         run: |
           python prep_input.py input_companies.csv cleaned_input.csv
 
-      - name: Run analyzer (XLSX output)
-        run: |
-          python analyzer.py cleaned_input.csv output_companies.xlsx
+    - name: Run analyzer (XLSX output)
+      run: |
+        python analyzer.py input_companies_v2.csv output_companies.xlsx
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
